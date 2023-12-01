@@ -1,0 +1,781 @@
+---
+title: "FTSA"
+author: "JUDETADEUS MASIKA"
+date: "2023-07-24"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+#Loading the required packages
+library(tidyverse)
+library(quantmod)
+library(PerformanceAnalytics)
+library(fBasics)
+#Importing the data set
+setwd("C:/Users/user/OneDrive/Documents/Financial Time Series Analysis")
+stock.price <-read.csv("HistoricalPrices.csv", header =  TRUE)
+#Selecting the Close stock price column.
+stock.price <-stock.price[,-c(2,3,4)]
+plot(stock.price$Close, type = 'l', main = 'Closing stock Price of S&P 500', xlab = 'Date', ylab = 'Price', col = 'red', lwd = 2)
+
+#Calculate log returns
+log_returns <- diff(log(stock.price$Close))
+#Create a time series plot for the stock
+plot.ts(log_returns, main = "Time series plot of Stock S&P500")
+
+#summary statistics of the stock log returns
+stacs <- data.frame(
+  "Close_Stock_price" = c(mean(log_returns),sd(log_returns),skewness(log_returns),kurtosis(log_returns, type = "excess"),
+         min(log_returns),max(log_returns)))
+row.names(stacs) <-c("mean","standard deviation","skewness","kurtosis","minimum","maximum")
+print(stacs)
+
+#Testing for the presence of the mean effect in the log returns
+#perform a two-sided t-test for log returns of the stock
+t.test <-t.test(log_returns, mu = 0)
+#extract the p-values for each t.test
+p.value <-c(t.test$p.value)
+print(p.value)
+
+library(tseries)
+test_result <-jarque.bera.test(stock.price$Close)
+test_statistic <- test_result$statistic
+p.value <-test_result$p.value
+#print the results
+cat("Jarque-Bera test statistic:", test_statistic, "\n")
+cat("p.value:", p.value, "\n")
+#checking the significance at 5% level
+if(p.value<0.05){
+  cat("Reject the null hypothesis: the log returns are not normally distributed\n")
+} else{
+  cat("Do not reject the null hypothesis: the log returns are normally distributed\n")
+}
+
+#Testing for the presence of ARCH effects.
+#We use the ARCH-LM test
+library(forecast)
+arima <-Arima(log_returns, order = c(2,0,2))
+residuals_stock <-residuals(arima)
+library(FinTS)
+arch.effect <-ArchTest(residuals_stock);arch.effect
+
+#Testing for heavy tails, we perform the Anderson Darling Test
+library(nortest)
+ad.test(residuals_stock)
+
+
+
+#Testing for serial correlation of the log returns of stock
+#We perform the Ljung Box Test on the log returns
+Box_test <-Box.test(log_returns, lag = 10, type = "Ljung-Box")
+print(Box_test)
+
+#Fitting the ARCH(1) model
+library(rugarch)
+arch_model <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder =c(1,0)),
+                        mean.model = list(armaOrder = c(1,0)), distribution = "norm")
+fit_arch <-ugarchfit(arch_model, data = residuals_stock)
+print(fit_arch)
+
+#Fitting a GARCH(1,1) model with the normal distribution
+#Defining the model specifications
+model <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+#Fitting the model
+model_fit <-ugarchfit(model, data = residuals_stock)
+print(model_fit)
+
+#Fitting the GARCH(1,1) model with the student-t distribution
+##Defining the model specifications
+model1 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     mean.model = list(armaOrder = c(1,0)), distribution = "std")
+#Fitting the model
+fit_model1 <- ugarchfit(model1, data = residuals_stock, solver = "hybrid")
+print(fit_model1)
+
+#Fitting the GARCH(1,1) model with the skewed student-t distribution
+#Defining the model specifications
+model2 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0)), distribution = "sstd")
+fit_model2 <-ugarchfit(model2, data = residuals_stock,
+                       solver = "hybrid")
+print(fit_model2)
+
+#Fitting of the GARCH-M Error distribution
+#Defining of the model specifications
+model3 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0), include.mean = TRUE))
+fit_model3 <-ugarchfit(model3, data = residuals_stock)
+print(fit_model3)
+
+#Fitting the IGARCH(1,1) Error distribution
+#Defining the model specifications
+model4 <-ugarchspec(variance.model = list(model = "iGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0)))
+fit_model4 <-ugarchfit(model4, data = residuals_stock)
+print(fit_model4)
+#Fitting the E-GARCH Error distribution
+#Defining the model specifications
+model5 <-ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1),
+                    mean.model = list(armaOrder = c(1,0))))
+#Fitting the model
+fit_model5 <-ugarchfit(model5, data = residuals_stock)
+print(fit_model5)
+
+#Calculate VaR using the formula
+calculate_VaR <- function(t, p) {
+  if (t < 2) {
+    stop("VaR can only be calculated for t >= 2")
+  }
+# Calculate the cumulative distribution function (CDF) of log returns up to time t-1
+FXt <- pnorm(log_returns[1:(t - 1)], mean = mean(log_returns[1:(t - 1)]), sd = sd(log_returns[1:(t - 1)]))
+# Calculate the inverse of the CDF at probability p
+inverse_CDF <- quantile(log_returns[1:(t - 1)], p)
+# Calculate VaR at time t
+VaR_t <- Cl(stock.price)[t - 1] * (exp(inverse_CDF) - 1)
+  return(VaR_t)}
+# Example usage:
+# Replace 0.05 with the desired probability level (e.g., 0.05 for 5% VaR)
+t <- 2  # Time t (replace with the desired time index)
+p <- 0.05  # Probability level
+VaR_t <- calculate_VaR(t, p)
+print(paste("VaR at time", t, "is:", VaR_t))
+
+# Calculate log returns (X) and squared returns (X^2)
+squared_returns <- log_returns^2
+# Step 2: Plot autocorrelation and partial autocorrelation functions for X and X^2
+plot_autocorrelation <- function(stock.price, title) {
+  par(mfrow = c(2, 1))
+  acf(stock.price, lag.max = 50, main = paste("ACF -", title))
+  pacf(stock.price, lag.max = 50, main = paste("PACF -", title))
+}
+# Plot for log returns (X)
+plot_autocorrelation(log_returns, "Log Returns (X)")
+plot_autocorrelation(squared_returns, "Squared Returns (X^2)")
+# Step 3: Perform the Ljung-Box test for X and X^2 at lag h = 50
+perform_ljung_box_test <- function(stock.price, lag = 50) {
+  lb_test <- Box.test(stock.price, lag = lag, type = "Ljung-Box")
+  return(lb_test$p.value)
+}
+# Perform the Ljung-Box test for log returns (X) at lag h = 50
+lb_p_value_X <- perform_ljung_box_test(log_returns, lag = 50)
+print(paste("Ljung-Box test p-value for X at lag 50:", lb_p_value_X))
+# Perform the Ljung-Box test for squared returns (X^2) at lag h = 50
+lb_p_value_X2 <- perform_ljung_box_test(squared_returns, lag = 50)
+print(paste("Ljung-Box test p-value for X^2 at lag 50:", lb_p_value_X2))
+
+
+library(astsa)
+# Split data into training and test sets
+data_length <- length(squared_returns)
+training_data <- squared_returns[2:round(0.8 * data_length)]
+test_data <- squared_returns[(round(0.8 * data_length) + 1):data_length]
+# Create empty vectors to store BIC and AICC values
+BIC_values <- matrix(NA, ncol = 6, nrow = 6)
+AIC_values <- matrix(NA, ncol = 6, nrow = 6)
+
+# Fit ARMA(p, q) models with Gaussian noise to training data
+for (p in 0:5) {
+  for (q in 0:5) {
+    if (p + q > 0 && p >= q) {
+      model <- arima(training_data, order = c(p, 0, q), method = "ML")
+      BIC_values[p + 1, q + 1] <- BIC(model)
+      AIC_values[p + 1, q + 1] <- AIC(model)
+    }
+  }
+}
+# Find the ARMA model orders that minimize BIC and AICC
+min_BIC <- which(BIC_values == min(BIC_values), arr.ind = TRUE)
+min_AIC <- which(AIC_values == min(AIC_values), arr.ind = TRUE)
+
+cat("ARMA(p, q) models that minimize BIC:", "\n")
+cat("p =", min_BIC[, 1] - 1, "q =", min_BIC[, 2] - 1, "\n")
+
+cat("\nARMA(p, q) models that minimize AICC:", "\n")
+cat("p =", min_AIC[, 1] - 1, "q =", min_AIC[, 2] - 1, "\n\n")
+# Fit ARMA(p, q) models with t-distributed noise to training data
+library(DistributionUtils)
+for (p in 0:5) {
+  for (q in 0:5) {
+    if (p + q > 0 && p >= q) {
+      model_tdist <- arima(training_data, order = c(p, 0, q), method = "ML")
+      BIC_values[p + 1, q + 1] <- BIC(model_tdist)
+      AIC_values[p + 1, q + 1] <- AIC(model_tdist)
+    }
+  }
+}
+# Find the ARMA model orders that minimize BIC and AIC with t-distributed noise
+min_BIC_tdist <- which(BIC_values == min(BIC_values), arr.ind = TRUE)
+min_AIC_tdist <- which(AIC_values == min(AIC_values), arr.ind = TRUE)
+
+cat("ARMA(p, q) models with t-distributed noise that minimize BIC:", "\n")
+cat("p =", min_BIC_tdist[, 1] - 1, "q =", min_BIC_tdist[, 2] - 1, "\n")
+cat("\nARMA(p, q) models with t-distributed noise that minimize AICC:", "\n")
+cat("p =", min_AIC_tdist[, 1] - 1, "q =", min_AIC_tdist[, 2] - 1, "\n\n")
+# Perform Ljung-Box test on the standardized residuals of each model
+perform_ljung_box_test_residuals <- function(model) {
+  residuals <- residuals(model)
+  lb_test <- Box.test(residuals, lag = 20, type = "Ljung-Box")
+  return(lb_test$p.value)
+}
+# Conduct Ljung-Box tests for the chosen ARMA models with Gaussian noise
+model_gaussian <- arima(training_data, order = c(min_BIC[, 1],1, 0, min_BIC[, 2],1), method = "ML")
+p_value_gaussian <- perform_ljung_box_test_residuals(model_gaussian)
+print(paste("Ljung-Box test p-value for ARMA model with Gaussian noise:", p_value_gaussian))
+
+# Conduct Ljung-Box tests for the chosen ARMA models with t-distributed noise
+model_tdist <- arima(training_data, order = c(min_BIC_tdist[, 1],1, 0, min_BIC_tdist[, 2], 1), method = "ML")
+p_value_tdist <- perform_ljung_box_test_residuals(model_tdist)
+print(paste("Ljung-Box test p-value for ARMA model with t-distributed noise:", p_value_tdist))
+
+# Deduce suitable GARCH models based on the obtained ARMA models
+# For example, you can use the rugarch package to fit GARCH models.
+# Here, we assume a GARCH(1, 1) model for illustration purposes.
+library(rugarch)
+# Fit GARCH(1,1) model to the squared returns
+garch_model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(min_BIC_tdist[, 1] ,1, 0, min_BIC_tdist[, 2] , 1)),
+                          distribution.model = "std")
+garch_fit <- ugarchfit(spec = garch_model, data = training_data)
+summary(garch_fit)
+
+library(rugarch)
+# Function to fit GARCH(p, q) model and compute BIC and AICC
+fit_garch_and_compute_criteria <- function(p, q, residuals_stock) {
+  garch_model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(p, q)),
+                            mean.model = list(armaOrder = c(0, 0)), distribution = "norm")
+  
+  garch_fit <- ugarchfit(garch_model, data = residuals_stock)
+  
+  # Get log-likelihood and number of parameters
+  log_likelihood <- garch_fit@fit$llh
+  num_parameters <- length(coef(garch_fit))
+  
+  # Sample size
+  n <- length(training_data)
+  
+  # Compute BIC and AICC
+  BIC <- -2 * log_likelihood + num_parameters * log(n)
+  AICC <- -2 * log_likelihood + 2 * num_parameters * (n / (n - num_parameters - 1))
+  
+  # Return results as a named list
+  return(list(p = p, q = q, BIC = BIC, AICC = AICC))
+}
+# Determine the maximal order of the ARMA models (K) from previous task
+K <- 5  
+# Loop through all values of p and q such that 0 < p <= K and 0 <= q <= K
+results <- list()
+for (p in 1:K) {
+  for (q in 0:K) {
+    if (p > 0 | q > 0) {  # Skip GARCH(0, 0) model as it is not valid
+      model_results <- fit_garch_and_compute_criteria(p, q, residuals_stock)
+      results <- c(results, model_results)
+    }
+  }
+}
+# Convert the list of results to a data frame
+results_df <- do.call(rbind.data.frame, results)
+# Find models that minimize BIC and AICC
+min_BIC_indices <- which(results_df$BIC == min(results_df$BIC))
+min_AICC_indices <- which(results_df$AICC == min(results_df$AICC))
+# Get the candidate models with minimum BIC and AICC
+models_min_BIC <- results[min_BIC_indices]
+models_min_AICC <- results[min_AICC_indices]
+# Print the results
+cat("Models minimizing BIC:\n")
+print(models_min_BIC)
+
+cat("\nModels minimizing AICC:\n")
+print(models_min_AICC)
+
+library(forecast)
+library(tseries)
+
+adf.test(residuals_stock)
+
+# Fit ARIMA model
+arima_model <- auto.arima(residuals_stock)
+
+# Print model summary
+summary(arima_model)
+
+# Forecast future values
+forecast_values <- forecast(arima_model, h = 12)
+
+# Plot forecasted values
+plot(forecast_values)
+# QQ-plot of the residuals
+qqnorm(residuals_stock)
+qqline(residuals_stock)
+
+
+
+# Fit ARMA models with t-distributed noise
+library(tseries)
+library(fGarch)
+residuals_stock1 <- as.ts(residuals_stock)
+K <- 5 # maximal order of the ARMA models with t distributed noise
+arma_t_models <- list()
+for (p in 0:K) {
+  for (q in 0:K) {
+    if (p + q > 0) {
+      arma_t_models[[paste0("ARMA(" , p, ",", q, ")")]] <- garchFit(
+        formula = ~ arma(p = p, q = q, x = residuals_stock1, distribution = "std"),
+        data = residuals_stock1,
+        trace = FALSE,
+        cond.dist = "std"
+      )
+    }
+  }
+}
+
+# Fit GARCH models with t-distributed noise
+garch_t_models <- list()
+for (p in 0:K) {
+  for (q in 0:K) {
+    for (o in 1:2) {
+      if (p + q + o > 0) {
+        garch_t_models[[paste0("GARCH(", p, ",", o, ",", q, ")")]] <- garchFit(
+          formula = ~ arma(p = p, q = q, x = residuals_stock),
+          data = residuals_stock,
+          trace = FALSE,
+          cond.dist = "std",
+          include.mean = FALSE,
+          garchOrder = c(o, 0),
+          t = TRUE
+        )
+        garch_t_models[[paste0("GARCH(", p, ",", q, ",", o, ")")]] <- garchFit(
+          formula = ~ arma(p = p, q = q, x = residuals_stock),
+          data = residuals_stock,
+          trace = FALSE,
+          cond.dist = "std",
+          include.mean = FALSE,
+          garchOrder = c(p, o),
+          t = TRUE
+        )
+      }
+    }
+  }
+}
+
+
+
+# Step 1: Report the distribution of Xt given (Xs,Vs,s < t) including its parameters (this will be either a Gaussian or a (generalized) t-distribution).
+# For example, if you are using a GARCH(1,1) model, you can report the distribution of Xt as follows:
+library(tidyverse)
+garch_model <- as(garch_model, "fGarch")
+distribution <- ifelse(garch_model$dist=="std", "norm", "std")
+params <- garch_model$params
+mean <- params[1]/(1-params[2]-params[3])
+variance <- params[4]/(1-params[2]-params[3])
+df <- ifelse(distribution=="std", Inf, params[5])
+cat("Distribution of Xt given (Xs,Vs,s < t):", distribution, "\n")
+cat("Mean:", mean, "\n")
+cat("Variance:", variance, "\n")
+cat("Degrees of freedom:", df, "\n\n")
+
+# Step 2: For each t = 1527,...,1751 of the test data set, compute VaRt given (Xs,Vs,s < t) using (11.1) for p = 0.1,0.05 and 0.01. Do not re-estimate the parameters of the models at each time t, but use the observations (X2,...Xt−1) to update the conditional variances as needed.
+# For example, if you are using a GARCH(1,1) model and want to compute VaRt for p=0.05 for all t in the test data set:
+p <- 0.05
+VaRt <- rep(NA,length(test_data))
+for (i in 2:length(test_data)) {
+  Xt <- test_data[i-1]
+  Vt <- garch_model@fit$variance[i-1]
+  VaRt[i] <- Xt + sqrt(Vt)*qnorm(p)
+}
+
+# Step 3: Count the number of VaR breaches, i.e., for t = 1577,...1751, count the number of times that Vt −Vt−1 ≤ VaRt.
+# For example:
+breaches <- sum(diff(test_data)^2 <= VaRt[-length(VaRt)])
+cat("Number of VaR breaches:", breaches)
+
+#Loading the required packages
+library(tidyverse)
+library(quantmod)
+library(PerformanceAnalytics)
+library(fBasics)
+#Importing the data set
+setwd("C:/Users/user/OneDrive/Documents/Financial Time Series Analysis")
+stock.price <-read.csv("HistoricalPrices.csv", header =  TRUE)
+#Selecting the Close stock price column.
+stock.price <-stock.price[,-c(2,3,4)]
+plot(stock.price$Close, type = 'l', main = 'Closing stock Price of S&P 500', xlab = 'Date', ylab = 'Price', col = 'red', lwd = 2)
+
+#Calculate log returns
+log_returns <- diff(log(stock.price$Close))
+#Create a time series plot for the stock
+plot.ts(log_returns, main = "Time series plot of Stock S&P500")
+
+#summary statistics of the stock log returns
+stacs <- data.frame(
+  "Close_Stock_price" = c(mean(log_returns),sd(log_returns),skewness(log_returns),kurtosis(log_returns, type = "excess"),
+         min(log_returns),max(log_returns)))
+row.names(stacs) <-c("mean","standard deviation","skewness","kurtosis","minimum","maximum")
+print(stacs)
+
+#Testing for the presence of the mean effect in the log returns
+#perform a two-sided t-test for log returns of the stock
+t.test <-t.test(log_returns, mu = 0)
+#extract the p-values for each t.test
+p.value <-c(t.test$p.value)
+print(p.value)
+
+library(tseries)
+test_result <-jarque.bera.test(stock.price$Close)
+test_statistic <- test_result$statistic
+p.value <-test_result$p.value
+#print the results
+cat("Jarque-Bera test statistic:", test_statistic, "\n")
+cat("p.value:", p.value, "\n")
+#checking the significance at 5% level
+if(p.value<0.05){
+  cat("Reject the null hypothesis: the log returns are not normally distributed\n")
+} else{
+  cat("Do not reject the null hypothesis: the log returns are normally distributed\n")
+}
+
+#Testing for the presence of ARCH effects.
+#We use the ARCH-LM test
+library(forecast)
+arima <-Arima(log_returns, order = c(2,0,2))
+residuals_stock <-residuals(arima)
+library(FinTS)
+arch.effect <-ArchTest(residuals_stock);arch.effect
+
+#Testing for heavy tails, we perform the Anderson Darling Test
+library(nortest)
+ad.test(residuals_stock)
+
+
+
+#Testing for serial correlation of the log returns of stock
+#We perform the Ljung Box Test on the log returns
+Box_test <-Box.test(log_returns, lag = 10, type = "Ljung-Box")
+print(Box_test)
+
+#Fitting the ARCH(1) model
+library(rugarch)
+arch_model <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder =c(1,0)),
+                        mean.model = list(armaOrder = c(1,0)), distribution = "norm")
+fit_arch <-ugarchfit(arch_model, data = residuals_stock)
+print(fit_arch)
+
+#Fitting a GARCH(1,1) model with the normal distribution
+#Defining the model specifications
+model <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+#Fitting the model
+model_fit <-ugarchfit(model, data = residuals_stock)
+print(model_fit)
+
+#Fitting the GARCH(1,1) model with the student-t distribution
+##Defining the model specifications
+model1 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     mean.model = list(armaOrder = c(1,0)), distribution = "std")
+#Fitting the model
+fit_model1 <- ugarchfit(model1, data = residuals_stock, solver = "hybrid")
+print(fit_model1)
+
+#Fitting the GARCH(1,1) model with the skewed student-t distribution
+#Defining the model specifications
+model2 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0)), distribution = "sstd")
+fit_model2 <-ugarchfit(model2, data = residuals_stock,
+                       solver = "hybrid")
+print(fit_model2)
+
+#Fitting of the GARCH-M Error distribution
+#Defining of the model specifications
+model3 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0), include.mean = TRUE))
+fit_model3 <-ugarchfit(model3, data = residuals_stock)
+print(fit_model3)
+
+#Fitting the IGARCH(1,1) Error distribution
+#Defining the model specifications
+model4 <-ugarchspec(variance.model = list(model = "iGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0)))
+fit_model4 <-ugarchfit(model4, data = residuals_stock)
+print(fit_model4)
+#Fitting the E-GARCH Error distribution
+#Defining the model specifications
+model5 <-ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1),
+                    mean.model = list(armaOrder = c(1,0))))
+#Fitting the model
+fit_model5 <-ugarchfit(model5, data = residuals_stock)
+print(fit_model5)
+
+#Calculate VaR using the formula
+calculate_VaR <- function(t, p) {
+  if (t < 2) {
+    stop("VaR can only be calculated for t >= 2")
+  }
+# Calculate the cumulative distribution function (CDF) of log returns up to time t-1
+FXt <- pnorm(log_returns[1:(t - 1)], mean = mean(log_returns[1:(t - 1)]), sd = sd(log_returns[1:(t - 1)]))
+# Calculate the inverse of the CDF at probability p
+inverse_CDF <- quantile(log_returns[1:(t - 1)], p)
+# Calculate VaR at time t
+VaR_t <- Cl(stock.price)[t - 1] * (exp(inverse_CDF) - 1)
+  return(VaR_t)}
+# Example usage:
+# Replace 0.05 with the desired probability level (e.g., 0.05 for 5% VaR)
+t <- 2  # Time t (replace with the desired time index)
+p <- 0.05  # Probability level
+VaR_t <- calculate_VaR(t, p)
+print(paste("VaR at time", t, "is:", VaR_t))
+
+# Calculate log returns (X) and squared returns (X^2)
+squared_returns <- log_returns^2
+# Step 2: Plot autocorrelation and partial autocorrelation functions for X and X^2
+plot_autocorrelation <- function(stock.price, title) {
+  par(mfrow = c(2, 1))
+  acf(stock.price, lag.max = 50, main = paste("ACF -", title))
+  pacf(stock.price, lag.max = 50, main = paste("PACF -", title))
+}
+# Plot for log returns (X)
+plot_autocorrelation(log_returns, "Log Returns (X)")
+plot_autocorrelation(squared_returns, "Squared Returns (X^2)")
+# Step 3: Perform the Ljung-Box test for X and X^2 at lag h = 50
+perform_ljung_box_test <- function(stock.price, lag = 50) {
+  lb_test <- Box.test(stock.price, lag = lag, type = "Ljung-Box")
+  return(lb_test$p.value)
+}
+# Perform the Ljung-Box test for log returns (X) at lag h = 50
+lb_p_value_X <- perform_ljung_box_test(log_returns, lag = 50)
+print(paste("Ljung-Box test p-value for X at lag 50:", lb_p_value_X))
+# Perform the Ljung-Box test for squared returns (X^2) at lag h = 50
+lb_p_value_X2 <- perform_ljung_box_test(squared_returns, lag = 50)
+print(paste("Ljung-Box test p-value for X^2 at lag 50:", lb_p_value_X2))
+
+
+library(astsa)
+# Split data into training and test sets
+data_length <- length(squared_returns)
+training_data <- squared_returns[2:round(0.8 * data_length)]
+test_data <- squared_returns[(round(0.8 * data_length) + 1):data_length]
+# Create empty vectors to store BIC and AICC values
+BIC_values <- matrix(NA, ncol = 6, nrow = 6)
+AIC_values <- matrix(NA, ncol = 6, nrow = 6)
+
+# Fit ARMA(p, q) models with Gaussian noise to training data
+for (p in 0:5) {
+  for (q in 0:5) {
+    if (p + q > 0 && p >= q) {
+      model <- arima(training_data, order = c(p, 0, q), method = "ML")
+      BIC_values[p + 1, q + 1] <- BIC(model)
+      AIC_values[p + 1, q + 1] <- AIC(model)
+    }
+  }
+}
+# Find the ARMA model orders that minimize BIC and AICC
+min_BIC <- which(BIC_values == min(BIC_values), arr.ind = TRUE)
+min_AIC <- which(AIC_values == min(AIC_values), arr.ind = TRUE)
+
+cat("ARMA(p, q) models that minimize BIC:", "\n")
+cat("p =", min_BIC[, 1] - 1, "q =", min_BIC[, 2] - 1, "\n")
+
+cat("\nARMA(p, q) models that minimize AICC:", "\n")
+cat("p =", min_AIC[, 1] - 1, "q =", min_AIC[, 2] - 1, "\n\n")
+# Fit ARMA(p, q) models with t-distributed noise to training data
+library(DistributionUtils)
+for (p in 0:5) {
+  for (q in 0:5) {
+    if (p + q > 0 && p >= q) {
+      model_tdist <- arima(training_data, order = c(p, 0, q), method = "ML")
+      BIC_values[p + 1, q + 1] <- BIC(model_tdist)
+      AIC_values[p + 1, q + 1] <- AIC(model_tdist)
+    }
+  }
+}
+# Find the ARMA model orders that minimize BIC and AIC with t-distributed noise
+min_BIC_tdist <- which(BIC_values == min(BIC_values), arr.ind = TRUE)
+min_AIC_tdist <- which(AIC_values == min(AIC_values), arr.ind = TRUE)
+
+cat("ARMA(p, q) models with t-distributed noise that minimize BIC:", "\n")
+cat("p =", min_BIC_tdist[, 1] - 1, "q =", min_BIC_tdist[, 2] - 1, "\n")
+cat("\nARMA(p, q) models with t-distributed noise that minimize AICC:", "\n")
+cat("p =", min_AIC_tdist[, 1] - 1, "q =", min_AIC_tdist[, 2] - 1, "\n\n")
+# Perform Ljung-Box test on the standardized residuals of each model
+perform_ljung_box_test_residuals <- function(model) {
+  residuals <- residuals(model)
+  lb_test <- Box.test(residuals, lag = 20, type = "Ljung-Box")
+  return(lb_test$p.value)
+}
+# Conduct Ljung-Box tests for the chosen ARMA models with Gaussian noise
+model_gaussian <- arima(training_data, order = c(min_BIC[, 1],1, 0, min_BIC[, 2],1), method = "ML")
+p_value_gaussian <- perform_ljung_box_test_residuals(model_gaussian)
+print(paste("Ljung-Box test p-value for ARMA model with Gaussian noise:", p_value_gaussian))
+
+# Conduct Ljung-Box tests for the chosen ARMA models with t-distributed noise
+model_tdist <- arima(training_data, order = c(min_BIC_tdist[, 1],1, 0, min_BIC_tdist[, 2], 1), method = "ML")
+p_value_tdist <- perform_ljung_box_test_residuals(model_tdist)
+print(paste("Ljung-Box test p-value for ARMA model with t-distributed noise:", p_value_tdist))
+
+# Deduce suitable GARCH models based on the obtained ARMA models
+# For example, you can use the rugarch package to fit GARCH models.
+# Here, we assume a GARCH(1, 1) model for illustration purposes.
+library(rugarch)
+# Fit GARCH(1,1) model to the squared returns
+garch_model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+                          mean.model = list(armaOrder = c(min_BIC_tdist[, 1] ,1, 0, min_BIC_tdist[, 2] , 1)),
+                          distribution.model = "std")
+garch_fit <- ugarchfit(spec = garch_model, data = training_data)
+summary(garch_fit)
+
+library(rugarch)
+# Function to fit GARCH(p, q) model and compute BIC and AICC
+fit_garch_and_compute_criteria <- function(p, q, residuals_stock) {
+  garch_model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(p, q)),
+                            mean.model = list(armaOrder = c(0, 0)), distribution = "norm")
+  
+  garch_fit <- ugarchfit(garch_model, data = residuals_stock)
+  
+  # Get log-likelihood and number of parameters
+  log_likelihood <- garch_fit@fit$llh
+  num_parameters <- length(coef(garch_fit))
+  
+  # Sample size
+  n <- length(training_data)
+  
+  # Compute BIC and AICC
+  BIC <- -2 * log_likelihood + num_parameters * log(n)
+  AICC <- -2 * log_likelihood + 2 * num_parameters * (n / (n - num_parameters - 1))
+  
+  # Return results as a named list
+  return(list(p = p, q = q, BIC = BIC, AICC = AICC))
+}
+# Determine the maximal order of the ARMA models (K) from previous task
+K <- 5  
+# Loop through all values of p and q such that 0 < p <= K and 0 <= q <= K
+results <- list()
+for (p in 1:K) {
+  for (q in 0:K) {
+    if (p > 0 | q > 0) {  # Skip GARCH(0, 0) model as it is not valid
+      model_results <- fit_garch_and_compute_criteria(p, q, residuals_stock)
+      results <- c(results, model_results)
+    }
+  }
+}
+# Convert the list of results to a data frame
+results_df <- do.call(rbind.data.frame, results)
+# Find models that minimize BIC and AICC
+min_BIC_indices <- which(results_df$BIC == min(results_df$BIC))
+min_AICC_indices <- which(results_df$AICC == min(results_df$AICC))
+# Get the candidate models with minimum BIC and AICC
+models_min_BIC <- results[min_BIC_indices]
+models_min_AICC <- results[min_AICC_indices]
+# Print the results
+cat("Models minimizing BIC:\n")
+print(models_min_BIC)
+
+cat("\nModels minimizing AICC:\n")
+print(models_min_AICC)
+
+library(forecast)
+library(tseries)
+
+adf.test(residuals_stock)
+
+# Fit ARIMA model
+arima_model <- auto.arima(residuals_stock)
+
+# Print model summary
+summary(arima_model)
+
+# Forecast future values
+forecast_values <- forecast(arima_model, h = 12)
+
+# Plot forecasted values
+plot(forecast_values)
+# QQ-plot of the residuals
+qqnorm(residuals_stock)
+qqline(residuals_stock)
+
+
+
+# Fit ARMA models with t-distributed noise
+library(tseries)
+library(fGarch)
+residuals_stock1 <- as.ts(residuals_stock)
+K <- 5 # maximal order of the ARMA models with t distributed noise
+arma_t_models <- list()
+for (p in 0:K) {
+  for (q in 0:K) {
+    if (p + q > 0) {
+      arma_t_models[[paste0("ARMA(" , p, ",", q, ")")]] <- garchFit(
+        formula = ~ arma(p = p, q = q, x = residuals_stock1, distribution = "std"),
+        data = residuals_stock1,
+        trace = FALSE,
+        cond.dist = "std"
+      )
+    }
+  }
+}
+
+# Fit GARCH models with t-distributed noise
+garch_t_models <- list()
+for (p in 0:K) {
+  for (q in 0:K) {
+    for (o in 1:2) {
+      if (p + q + o > 0) {
+        garch_t_models[[paste0("GARCH(", p, ",", o, ",", q, ")")]] <- garchFit(
+          formula = ~ arma(p = p, q = q, x = residuals_stock),
+          data = residuals_stock,
+          trace = FALSE,
+          cond.dist = "std",
+          include.mean = FALSE,
+          garchOrder = c(o, 0),
+          t = TRUE
+        )
+        garch_t_models[[paste0("GARCH(", p, ",", q, ",", o, ")")]] <- garchFit(
+          formula = ~ arma(p = p, q = q, x = residuals_stock),
+          data = residuals_stock,
+          trace = FALSE,
+          cond.dist = "std",
+          include.mean = FALSE,
+          garchOrder = c(p, o),
+          t = TRUE
+        )
+      }
+    }
+  }
+}
+
+
+
+# Step 1: Report the distribution of Xt given (Xs,Vs,s < t) including its parameters (this will be either a Gaussian or a (generalized) t-distribution).
+# For example, if you are using a GARCH(1,1) model, you can report the distribution of Xt as follows:
+library(tidyverse)
+garch_model <- as(garch_model, "fGarch")
+distribution <- ifelse(garch_model$dist=="std", "norm", "std")
+params <- garch_model$params
+mean <- params[1]/(1-params[2]-params[3])
+variance <- params[4]/(1-params[2]-params[3])
+df <- ifelse(distribution=="std", Inf, params[5])
+cat("Distribution of Xt given (Xs,Vs,s < t):", distribution, "\n")
+cat("Mean:", mean, "\n")
+cat("Variance:", variance, "\n")
+cat("Degrees of freedom:", df, "\n\n")
+
+# Step 2: For each t = 1527,...,1751 of the test data set, compute VaRt given (Xs,Vs,s < t) using (11.1) for p = 0.1,0.05 and 0.01. Do not re-estimate the parameters of the models at each time t, but use the observations (X2,...Xt−1) to update the conditional variances as needed.
+# For example, if you are using a GARCH(1,1) model and want to compute VaRt for p=0.05 for all t in the test data set:
+p <- 0.05
+VaRt <- rep(NA,length(test_data))
+for (i in 2:length(test_data)) {
+  Xt <- test_data[i-1]
+  Vt <- garch_model@fit$variance[i-1]
+  VaRt[i] <- Xt + sqrt(Vt)*qnorm(p)
+}
+
+# Step 3: Count the number of VaR breaches, i.e., for t = 1577,...1751, count the number of times that Vt −Vt−1 ≤ VaRt.
+# For example:
+breaches <- sum(diff(test_data)^2 <= VaRt[-length(VaRt)])
+cat("Number of VaR breaches:", breaches)
+
+
+
+```
+
+
+

@@ -1,0 +1,314 @@
+---
+title: "LABS 2, 3 & 5 FTSA Lab"
+author: "JUDETADEUS MASIKA S030-01-1631/2019,
+         MARVIN GITHAMBO S030-01-1794/2020,
+         SAMUEL WAHOME S030-01-1789/2020"
+date: "2023-06-21"
+output:
+  word_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+```{r}
+#Loading the required packages
+library(readxl)
+library(rugarch)
+#Loading the data set
+bank <- read_xlsx("FTSA1.xlsx")
+attach(bank)
+USD_KES.returns <- (c(NA, diff(log(bank$USD))))
+GBP_KES.returns <- (c(NA, diff(log(bank$POUND))))
+EUR_KES.returns <- (c(NA, diff(log(bank$EURO))))
+JPY_KES.returns <- (c(NA, diff(log(bank$YEN))))
+ZAR_KES.returns <- (c(NA, diff(log(bank$RAND))))
+# Combine returns into a single data frame
+returns <- data.frame(Date = bank$Date,
+                      USD_KES.returns = USD_KES.returns,
+                      GBP_KES.returns = GBP_KES.returns,
+                      EUR_KES.returns = EUR_KES.returns,
+                      JPY_KES.returns = JPY_KES.returns,
+                      ZAR_KES.returns = ZAR_KES.returns)
+returns <-na.omit(returns)
+```
+#Question one.
+```{r}
+#Determine the order of the ARIMA (p,d,q)
+#The autocorrelation plots
+par(mfrow = c(2,3))
+acf(returns$USD_KES.returns, main = "ACF FOR THE USD/KES")
+acf(returns$GBP_KES.returns, main = "ACF FOR THE GBP/KES")
+acf(returns$EUR_KES.returns, main = "ACF FOR THE EURO/KES")
+acf(returns$JPY_KES.returns, main = "ACF FOR THE JPY/KES")
+acf(returns$ZAR_KES.returns, main = "ACF FOR THE RAND/KES")
+```
+Conclusion: The acf plots of currency pairs except the JPY/KES do not exhibit the Moving Average component. The lags are within the threshold level. 
+```{r}
+#The partial autocorrelation plots
+par(mfrow = c(2,3))
+pacf(returns$USD_KES.returns, main = "PACF FOR THE USD/KES")
+pacf(returns$GBP_KES.returns, main = "PACF FOR THE GBP/KES")
+pacf(returns$EUR_KES.returns, main = "PACF FOR THE EURO/KES")
+pacf(returns$JPY_KES.returns, main = "PACF FOR THE JPY/KES")
+pacf(returns$ZAR_KES.returns, main = "PACF FOR THE RAND/KES")
+```
+Conclusion: The pacf plots shows that the auto regressive component exists in all the currency pairs.
+```{r}
+library(forecast)
+#based on the pacf and acf plot we obtained value of p,q,d
+arima <- Arima(returns$USD_KES.returns, order = c(1, 0, 1))
+log_usd <- residuals(arima)
+arima <- Arima(returns$GBP_KES.returns, order = c(1, 0, 1))
+log_gbp <- residuals(arima)
+arima <- Arima(returns$EUR_KES.returns, order = c(1, 0, 2))
+log_euro <- residuals(arima)
+arima <- Arima(returns$JPY_KES.returns, order = c(2, 0, 1))
+log_jpy <- residuals(arima)
+arima <- Arima(returns$ZAR_KES.returns, order = c(1, 0, 1))
+log_rand <- residuals(arima)
+```
+
+```{r}
+#testing the presence of the mean effect; performing the t-test
+test <-t.test(log_usd, mu = 0)
+test1 <-t.test(log_gbp, mu = 0)
+test2 <-t.test(log_euro, mu = 0)
+test3 <-t.test(log_jpy, mu = 0)
+test4 <-t.test(log_rand, mu = 0)
+```
+Conclusion: the p-value of the log returns is greater than 5% level of significance, therefore we do not reject the null hypothesis and thus the mean is zero.
+```{r}
+library(tseries)
+#Skewness testing; We perform the Jarque Bera test
+jb.test <-jarque.bera.test(log_usd)
+jb.test1 <-jarque.bera.test(log_euro)
+jb.test2 <-jarque.bera.test(log_gbp)
+jb.test3 <-jarque.bera.test(log_jpy)
+jb.test4 <-jarque.bera.test(log_rand)
+```
+Conclusion: We conclude that the log returns are significantly skewed since the p-values for the log returns are less than the 5% level of significance. Testing under H_0 that states that the log returns are significantly skewed, we fail to reject H_0.
+```{r}
+#Testing for heavy tails; We perform an Anderson Darling test
+library(nortest)
+ad <-ad.test(log_usd)
+ad <-ad.test(log_euro)
+ad <-ad.test(log_gbp)
+ad <-ad.test(log_jpy)
+ad <-ad.test(log_rand)
+```
+Conclusion: Testing under H_0 that states that log returns do not exhibit heavy tails versus H_1 that states log returns exhibit heavy tails.From the tests, we conclude that H_0 is rejected since the p-values of the log returns are less than 5% level of significance. Log returns have heavy tails.
+```{r}
+#testing for the ARCH effects; We perform an ARCH-LM test
+library(FinTS)
+arch.test <-ArchTest(log_usd)
+arch.test1 <-ArchTest(log_euro)
+arch.test2 <-ArchTest(log_gbp)
+arch.test3 <-ArchTest(log_jpy)
+arch.test4 <-ArchTest(log_rand)
+```
+Conclusion: From the tests, we do not reject H_0 since the p-values of the log returns are less than 5% level of significance, hence the log returns have ARCH EFFECTS
+#Fitting the ARCH model
+```{r}
+library(rugarch)
+#set up the model specification
+spec<- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,0)),
+                   mean.model = list(armaOrder = c(1,0)), distribution = "norm")
+#fit an ARCH(1) model
+model <-ugarchfit(spec, data = log_usd)
+#model specification
+specs1 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,0)),
+                    mean.model = list(armaOrder = c(1,0)), distribution = "norm")
+#fit the ARCH(1) model
+model1 <-ugarchfit(specs1, data = log_euro)
+#model specification
+specs2 <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,0)),
+                    mean.model = list(armaOrder =c(1,0)), distribution = "norm")
+#fit the ARCH(1) model
+model2 <-ugarchfit(specs2, data = log_gbp)
+print(model2)
+```
+Conclusion: The estimated value of alpha 1 indicates the impact of past shocks on volatility. A higher alpha1 value suggests higher volatility persistence, while a lower alpha1 value suggests lower volatility persistence. Since the USD/KES and JPY/KES currencies have higher alpha1 values, it suggests that these currencies exhibit higher persistence of volatility compared to the other three currencies . This means that past shocks have a longer-lasting effect on the variance of these currencies, and their volatility is likely to be more persistent. The EURO/KES, ZAR/KES, and GBP/KES currencies have lower alpha1 values, indicating lower persistence of volatility. This suggests that the impact of past shocks on the variance is less significant for these currencies, and their volatility is likely to be smooth and less persistent compared to the USD/KES and JPY/KES.
+#Fitting a GARCH(1,1) model fit with the normal distribution
+```{r}
+#setting the model specification
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+#fitting the model
+fit <-ugarchfit(specs, data = log_usd)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = log_euro)
+specs <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                    mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = log_rand)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = log_gbp)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = log_jpy)
+print(fit)
+```
+Conclusion: The alpha1 parameter captures the persistence of volatility, indicating how much past shocks influence current volatility. A higher alpha1 value indicates higher persistence of volatility, meaning past shocks have a longer-lasting effect on the variance of the time series data. The beta1 parameter captures the extent to which the volatility returns to its long-run equilibrium level after a shock. A higher beta1 value indicates faster reversion of volatility. Based on the output,there seems to be low volatility persistence in all the currencies.
+#GARCH(1,1) model fit with student t-distribution
+```{r}
+#Defining model specifications
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "std")
+fit <-ugarchfit(specs, data = log_usd, 
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "std")
+fit <-ugarchfit(specs, data = log_euro,
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "std")
+fit <-ugarchfit(specs, data = log_gbp,
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "std")
+fit <-ugarchfit(specs, data = log_rand, 
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "std")
+fit <-ugarchfit(specs, data = log_jpy,
+                solver = "hybrid");fit
+```
+Conclusion: The GARCH(1,1) model with a Student-t distribution appears to capture the volatility dynamics of the data reasonably well. However, there are some indications of potential parameter instability and lack of fit according to certain diagnostic tests.
+The volatility is persistent since the value of beta1 is high (0.884842), indicating a strong persistence of past conditional variances in the current conditional variance. The model also exhibits heavy tails, the shape parameter is (4.364665), suggesting relatively heavy tails compared to a normal distribution.
+#GARCH(1,1) Model fit using skewed student t distribution
+```{r}
+#Defining Garch(1,1) with skewed student t distribution
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "sstd")
+fit <-ugarchfit(specs, data = log_usd,
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH",garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "sstd")
+fit <-ugarchfit(specs, data = log_euro,
+                solver = "hybrid")
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)),
+                   distribution = "sstd")
+fit <-ugarchfit(specs, data = log_gbp,
+                solver = "hybrid");fit
+```
+The distribution is indeed skewed based on the estimated skewness parameters, which is significantly different from zero. All the currencies exhibit positive skewness. There is also strong volatility persistence as the value of beta1 is very high (0.922795).
+
+Comparisons of the three volatility models
+First, we can see that the estimated mean level of the volatility (mu) is close to zero for all three models.This is in line with the results obtained when we tested for the significance of the mean.
+
+We can see that the estimated value of omega is close to zero for both the normal and skewed Student's t models but is not statistically significant for the normal model. This suggests that most of the variation in the series is captured by the auto regressive component of the GARCH model.
+
+We can compare the estimates of alpha1 and beta1, which capture the short-term and long-term persistence of the volatility, respectively. We can see that the estimates of alpha1 are similar for both the normal and skewed Student's t models, but that the estimate of beta1 is higher for the normal model than for the skewed Student's t model. This suggests that the skewed Student's t model may be better at capturing the long-term persistence of the volatility, which may be caused by occasional extreme events.
+
+We can see that the skewed Student's t model includes two additional parameters, skew and shape, which capture the skewness and kurtosis of the returns distribution. These parameters are both statistically significant, suggesting that the returns distribution exhibits significant skewness and fat tails.
+
+Based on these comparisons, the skewed Student's t model for this data appears to provide a better fit to the data by capturing the long-term persistence and the skewness and kurtosis of the returns distribution.
+Question two.
+#Testing for serial correlation
+```{r}
+#performing the Ljung Box test on the returns
+test <-Box.test(returns$USD_KES.returns, lag = 10, type = "Ljung-Box")
+test1 <-Box.test(returns$GBP_KES.returns, lag = 10, type = "Ljung-Box")
+test2 <-Box.test(returns$EUR_KES.returns, lag = 10, type = "Ljung-Box")
+test3 <-Box.test(returns$JPY_KES.returns, lag = 10, type = "Ljung-Box")
+test4 <-Box.test(returns$ZAR_KES.returns, lag = 10, type = "Ljung-Box")
+```
+Conclusion: Since all the p-values of the log returns are less than 5% level of significance, we reject H_0, since the alternative states that log returns are serially correlated.
+```{r}
+#Fitting an ARIMA model to the log returns
+#Obtaining the residuals of every currency pair
+arima.usd <-arima(returns$USD_KES.returns, order = c(1,0,1))
+residuals.usd <-residuals(arima.usd)
+arima.euro <-arima(returns$EUR_KES.returns, order =c(1,0,1))
+residuals.euro <-residuals(arima.euro)
+arima.gbp <-arima(returns$GBP_KES.returns, order = c(1,0,1))
+residuals.gbp <-residuals(arima.gbp)
+arima.jpy <-arima(returns$JPY_KES.returns, order = c(1,0,1))
+residuals.jpy <-residuals(arima.jpy)
+arima.rand <-arima(returns$ZAR_KES.returns, order = c(1,0,1))
+residuals.rand <-residuals(arima.rand)
+```
+
+```{r}
+#Defining the model specifications
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0), include.mean = TRUE),
+                   distribution.model = "norm")
+#Fitting the model using the residuals as the data
+fit <-ugarchfit(specs, data = residuals.usd)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0), include.mean = TRUE),
+                   distribution.model = "norm")
+fit <-ugarchfit(specs, data = residuals.euro)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0), include.mean = TRUE), 
+                   distribution.model = "norm")
+fit <-ugarchfit(specs, data = residuals.gbp)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0),
+                                     include.mean = TRUE), distribution.model = "norm")
+#Fitting the model
+fit <-ugarchfit(specs, data = residuals.rand);fit
+```
+Check for the model adequacy.
+Using the Information Criteria, the AIC, BIC, HQIC and SIC, the smaller the values of these criteria, the better the model fit. USD/KES seems to fit better with the values of AIC = -8.9856, BIC = -8.9794 and HQIC = -8.9834, the smallest values as compared to the other 4 currency pairs.
+Check for the volatility of the risk premium.
+```{r}
+#Estimate the GARCH(1,1)-M model
+specs <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                     mean.model = list(armaOrder = c(1,0), include.mean = TRUE))
+fit <-ugarchfit(specs, data = residuals.usd)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0), include.mean = TRUE))
+fit <-ugarchfit(specs, data = residuals.euro)
+specs <-ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0), include.mean = TRUE))
+fit <-ugarchfit(specs, data = residuals.rand)
+```
+#The Risk Premium is not statistically significant since all the p_values are greater than 5% level of signficance.
+IGARCH(1,1) error distribution
+```{r}
+specs <-ugarchspec(variance.model = list(model = "iGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.usd)
+specs <-ugarchspec(variance.model = list(model = "iGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.euro)
+specs <-ugarchspec(variance.model = list(model = "iGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.gbp);fit
+```
+#The volatility forecasts of the IGARCH(1,1) model are not constant for all forecast horizons because the model is based on the assumption that volatility is time-varying. The model uses the past volatility to predict future volatility, and the past volatility can vary over time.
+GJR-GARCH(1,1) fit
+```{r}
+ts.returns <-ts(returns)
+specs <-ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1),
+                                         external.regressors =ts.returns), mean.model= list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.usd)
+specs <-ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1),
+                                         external.regressors = ts.returns),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.euro);fit
+```
+#EGARCH(1,1) fit
+```{r}
+specs <-ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.usd)
+specs <-ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.euro)
+specs <-ugarchspec(variance.model = list(model = "eGARCH", garchOrder = c(1,1)),
+                   mean.model = list(armaOrder = c(1,0)))
+fit <-ugarchfit(specs, data = residuals.rand);fit
+```
+Conclusion: The distribution exhibits higher volatility persistence as the value of beta is very high.
