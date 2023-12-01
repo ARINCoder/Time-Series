@@ -1,8 +1,6 @@
 ---
-title: "LABS 2, 3 & 5 FTSA Lab"
-author: "JUDETADEUS MASIKA S030-01-1631/2019,
-         MARVIN GITHAMBO S030-01-1794/2020,
-         SAMUEL WAHOME S030-01-1789/2020"
+title: FINANCIAL TIME SERIES
+author: "MARVIN GITHAMBO "
 date: "2023-06-21"
 output:
   word_document: default
